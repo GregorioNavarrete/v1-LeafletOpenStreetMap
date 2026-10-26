@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Demo de Seguimiento en Mapa</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css" />
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            font-family: Arial, sans-serif;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        #map {
+            height: 400px;
+            margin-bottom: 20px;
+        }
+        .grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+        input, select, button {
+            margin: 5px 0;
+            padding: 5px;
+        }
+        button {
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            padding: 10px;
+            cursor: pointer;
+        }
+        ul {
+            list-style-type: none;
+            padding: 0;
+        }
+        li {
+            margin-bottom: 5px;
+        }
+        #locationList button {
+            margin-left: 5px;
+            padding: 2px 5px;
+            font-size: 0.8em;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Demo de Seguimiento en Mapa</h1>
+        <div id="map"></div>
+        <div class="grid">
+            <div>
+                <h2>Lista de todas las ubicaciones</h2>
+                <ul id="locationList"></ul>
+            </div>
+            <div>
+                <h2>Ingrese nueva ubicación</h2>
+                <input type="number" id="lng" placeholder="longitud" step="any">
+                <input type="number" id="lat" placeholder="latitud" step="any">
+                <input type="text" id="locationName" placeholder="nombre de la ubicación">
+                <button onclick="addLocation()">Agregar</button>
+                <button onclick="getCurrentLocation()">Obtener Mi Ubicación</button>
+                <p>hacer click en el mapa para ingresar automáticamente esas coordenadas de latitud y longitud</p>
+            </div>
+            <div>
+                <h2>Comparar distancias entre 2 locales</h2>
+                <select id="location1"></select>
+                <select id="location2"></select>
+                <button onclick="calculateDistance()">Calcular</button>
+                <p id="distanceResult"></p>
+            </div>
+            <div>
+                <h2>ubicaciones al rededor</h2>
+                <select id="centerLocation"></select>
+                <input type="number" id="radius" placeholder="Ingrese los kilómetros al rededor de la ubicación ingresada" step="any">
+                <button onclick="findNearbyLocations()">Buscar</button>
+                <ul id="nearbyList"></ul>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://unpkg.com/leaflet@1.7.1/dist/leaflet.js"></script>
+    <script>
+        let map;
+        let locations = [];
+        let markers = [];
+        let polyline;
+
+        // Inicializa el mapa y configura el evento de clic
+        function initMap() {
+            map = L.map('map').setView([0, 0], 2);
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                attribution: '© OpenStreetMap contributors'
+            }).addTo(map);
+
+            map.on('click', function(e) {
+                document.getElementById('lat').value = e.latlng.lat.toFixed(6);
+                document.getElementById('lng').value = e.latlng.lng.toFixed(6);
+            });
+        }
+
+        // Agrega una nueva ubicación a la lista y actualiza el mapa
+        function addLocation() {
+            const name = document.getElementById('locationName').value;
+            const lat = parseFloat(document.getElementById('lat').value);
+            const lng = parseFloat(document.getElementById('lng').value);
+
+            if (name && !isNaN(lat) && !isNaN(lng)) {
+                locations.push({ name, lat, lng });
+                updateMap();
+                updateLocationList();
+                updateSelects();
+                clearInputs();
+            } else {
+                alert('Por favor, ingrese datos válidos.');
+            }
+        }
+
+        // Actualiza los marcadores en el mapa
+        function updateMap() {
+            markers.forEach(marker => map.removeLayer(marker));
+            markers = [];
+
+            locations.forEach((loc, index) => {
+                const marker = L.marker([loc.lat, loc.lng]).addTo(map);
+                marker.bindPopup(loc.name);
+                markers[index] = marker; // Almacena el marcador con su índice
+            });
+
+            if (locations.length > 0) {
+                map.fitBounds(L.latLngBounds(locations.map(loc => [loc.lat, loc.lng])));
+            }
+        }
+
+        // Actualiza la lista de ubicaciones en la interfaz de usuario
+        function updateLocationList() {
+            const list = document.getElementById('locationList');
+            list.innerHTML = '';
+            locations.forEach((loc, index) => {
+                const li = document.createElement('li');
+                li.innerHTML = `
+                    ${index + 1}-${loc.name}: ${loc.lat.toFixed(4)}, ${loc.lng.toFixed(4)}
+                    <button onclick="viewLocation(${index})">Ver</button>
+                    <button onclick="modifyLocation(${index})">Modificar</button>
+                    <button onclick="deleteLocation(${index})">Eliminar</button>
+                `;
+                list.appendChild(li);
+            });
+        }
+
+        // Modifica una ubicación existente
+        function modifyLocation(index) {
+            const loc = locations[index];
+            document.getElementById('locationName').value = loc.name;
+            document.getElementById('lat').value = loc.lat;
+            document.getElementById('lng').value = loc.lng;
+            locations.splice(index, 1);
+            updateMap();
+            updateLocationList();
+            updateSelects();
+        }
+
+        // Elimina una ubicación de la lista
+        function deleteLocation(index) {
+            locations.splice(index, 1);
+            updateMap();
+            updateLocationList();
+            updateSelects();
+        }
+
+        // Centra el mapa en una ubicación específica
+        function viewLocation(index) {
+            const loc = locations[index];
+            map.setView([loc.lat, loc.lng], 15); // Nivel de zoom 15 para una vista más cercana
+            markers[index].openPopup(); // Abre el popup para este marcador
+        }
+
+        // Actualiza los menús desplegables con las ubicaciones disponibles
+        function updateSelects() {
+            const selects = ['location1', 'location2', 'centerLocation'];
+            selects.forEach(selectId => {
+                const select = document.getElementById(selectId);
+                select.innerHTML = '<option value="">Seleccione ubicación</option>';
+                locations.forEach((loc, index) => {
+                    const option = document.createElement('option');
+                    option.value = index;
+                    option.textContent = loc.name;
+                    select.appendChild(option);
+                });
+            });
+        }
+
+        // Limpia los campos de entrada después de agregar una ubicación
+        function clearInputs() {
+            document.getElementById('locationName').value = '';
+            document.getElementById('lat').value = '';
+            document.getElementById('lng').value = '';
+        }
+
+        // Calcula la distancia entre dos ubicaciones seleccionadas
+        function calculateDistance() {
+            const index1 = document.getElementById('location1').value;
+            const index2 = document.getElementById('location2').value;
+
+            if (index1 && index2) {
+                const loc1 = locations[index1];
+                const loc2 = locations[index2];
+                const distance = map.distance([loc1.lat, loc1.lng], [loc2.lat, loc2.lng]) / 1000; // km
+                document.getElementById('distanceResult').textContent = `Distancia entre los 2 puntos: ${distance.toFixed(2)} km`;
+
+                // Dibujar la línea roja
+                if (polyline) {
+                    map.removeLayer(polyline);
+                }
+                polyline = L.polyline([[loc1.lat, loc1.lng], [loc2.lat, loc2.lng]], {color: 'red'}).addTo(map);
+            } else {
+                alert('Por favor, seleccione dos ubicaciones.');
+            }
+        }
+
+        // Encuentra ubicaciones cercanas dentro de un radio especificado
+        function findNearbyLocations() {
+            const centerIndex = document.getElementById('centerLocation').value;
+            const radius = parseFloat(document.getElementById('radius').value);
+
+            if (centerIndex !== '' && !isNaN(radius)) {
+                const center = locations[centerIndex];
+                const nearbyLocations = locations.filter((loc, index) => {
+                    if (index.toString() === centerIndex) return false;
+                    const distance = map.distance([center.lat, center.lng], [loc.lat, loc.lng]) / 1000; // km
+                    return distance <= radius;
+                });
+
+                const nearbyList = document.getElementById('nearbyList');
+                nearbyList.innerHTML = '<h3>Lista de todas las ubicaciones dentro de esa distancia respecto la ubicación:</h3>';
+                nearbyLocations.forEach((loc, index) => {
+                    const li = document.createElement('li');
+                    li.textContent = `${index + 1}-${loc.name}: ${loc.lat.toFixed(4)}, ${loc.lng.toFixed(4)}`;
+                    nearbyList.appendChild(li);
+                });
+
+                // Dibujar las líneas rojas
+                if (polyline) {
+                    map.removeLayer(polyline);
+                }
+                const latlngs = nearbyLocations.map(loc => [[center.lat, center.lng], [loc.lat, loc.lng]]);
+                polyline = L.polyline(latlngs, {color: 'red'}).addTo(map);
+            } else {
+                alert('Por favor, seleccione una ubicación central y un radio válido.');
+            }
+        }
+
+        // Obtiene la ubicación actual del usuario
+        function getCurrentLocation() {
+            if ("geolocation" in navigator) {
+                navigator.geolocation.getCurrentPosition(function(position) {
+                    document.getElementById('lat').value = position.coords.latitude.toFixed(6);
+                    document.getElementById('lng').value = position.coords.longitude.toFixed(6);
+                }, function(error) {
+                    alert("Error al obtener la ubicación: " + error.message);
+                });
+            } else {
+                alert("Geolocalización no está disponible en su navegador.");
+            }
+        }
+
+        // Inicializa el mapa cuando se carga la página
+        window.onload = initMap;
+    </script>
+</body>
+</html>
